@@ -48,7 +48,8 @@ LaserScanMatcher::LaserScanMatcher(ros::NodeHandle nh, ros::NodeHandle nh_privat
   initialized_(false),
   received_imu_(false),
   received_odom_(false),
-  received_vel_(false)
+  received_vel_(false),
+  tf_Listener_(tfBuffer_)
 {
   ROS_INFO("Starting LaserScanMatcher");
 
@@ -462,7 +463,7 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
   // the predicted change of the laser's position, in the fixed frame
 
-  tf::Transform pr_ch;
+  tf2::Transform pr_ch;
   createTfFromXYTheta(pr_ch_x, pr_ch_y, pr_ch_a, pr_ch);
 
   // account for the change since the last kf, in the fixed frame
@@ -471,12 +472,12 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
   // the predicted change of the laser's position, in the laser frame
 
-  tf::Transform pr_ch_l;
+  tf2::Transform pr_ch_l;
   pr_ch_l = laser_to_base_ * f2b_.inverse() * pr_ch * f2b_ * base_to_laser_ ;
 
   input_.first_guess[0] = pr_ch_l.getOrigin().getX();
   input_.first_guess[1] = pr_ch_l.getOrigin().getY();
-  input_.first_guess[2] = tf::getYaw(pr_ch_l.getRotation());
+  input_.first_guess[2] = getYaw(pr_ch_l.getRotation());
 
   // If they are non-Null, free covariance gsl matrices to avoid leaking memory
   if (output_.cov_x_m)
@@ -498,13 +499,13 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   // *** scan match - using point to line icp from CSM
 
   sm_icp(&input_, &output_);
-  tf::Transform corr_ch;
+  tf2::Transform corr_ch;
 
   if (output_.valid)
   {
 
     // the correction of the laser's position, in the laser frame
-    tf::Transform corr_ch_l;
+    tf2::Transform corr_ch_l;
     createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
 
     // the correction of the base's position, in the base frame
@@ -522,7 +523,7 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
       pose_msg = boost::make_shared<geometry_msgs::Pose2D>();
       pose_msg->x = f2b_.getOrigin().getX();
       pose_msg->y = f2b_.getOrigin().getY();
-      pose_msg->theta = tf::getYaw(f2b_.getRotation());
+      pose_msg->theta = getYaw(f2b_.getRotation());
       pose_publisher_.publish(pose_msg);
     }
     if (publish_pose_stamped_)
@@ -534,7 +535,13 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
       pose_stamped_msg->header.stamp    = time;
       pose_stamped_msg->header.frame_id = fixed_frame_;
 
-      tf::poseTFToMsg(f2b_, pose_stamped_msg->pose);
+      pose_stamped_msg->pose.position.x = f2b_.getOrigin().getX(); 
+      pose_stamped_msg->pose.position.y = f2b_.getOrigin().getY(); 
+      pose_stamped_msg->pose.position.z = f2b_.getOrigin().getZ(); 
+      pose_stamped_msg->pose.orientation.x = f2b_.getRotation().getX();
+      pose_stamped_msg->pose.orientation.y = f2b_.getRotation().getY();
+      pose_stamped_msg->pose.orientation.z = f2b_.getRotation().getZ();
+      pose_stamped_msg->pose.orientation.w = f2b_.getRotation().getW();
 
       pose_stamped_publisher_.publish(pose_stamped_msg);
     }
@@ -543,7 +550,14 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
       // unstamped PoseWithCovariance message
       geometry_msgs::PoseWithCovariance::Ptr pose_with_covariance_msg;
       pose_with_covariance_msg = boost::make_shared<geometry_msgs::PoseWithCovariance>();
-      tf::poseTFToMsg(f2b_, pose_with_covariance_msg->pose);
+      
+      pose_with_covariance_msg->pose.position.x = f2b_.getOrigin().getX(); 
+      pose_with_covariance_msg->pose.position.y = f2b_.getOrigin().getY(); 
+      pose_with_covariance_msg->pose.position.z = f2b_.getOrigin().getZ(); 
+      pose_with_covariance_msg->pose.orientation.x = f2b_.getRotation().getX();
+      pose_with_covariance_msg->pose.orientation.y = f2b_.getRotation().getY();
+      pose_with_covariance_msg->pose.orientation.z = f2b_.getRotation().getZ();
+      pose_with_covariance_msg->pose.orientation.w = f2b_.getRotation().getW();
 
       if (input_.do_compute_covariance)
       {
@@ -577,7 +591,13 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
       pose_with_covariance_stamped_msg->header.stamp    = time;
       pose_with_covariance_stamped_msg->header.frame_id = fixed_frame_;
 
-      tf::poseTFToMsg(f2b_, pose_with_covariance_stamped_msg->pose.pose);
+      pose_with_covariance_stamped_msg->pose.pose.position.x = f2b_.getOrigin().getX(); 
+      pose_with_covariance_stamped_msg->pose.pose.position.y = f2b_.getOrigin().getY(); 
+      pose_with_covariance_stamped_msg->pose.pose.position.z = f2b_.getOrigin().getZ(); 
+      pose_with_covariance_stamped_msg->pose.pose.orientation.x = f2b_.getRotation().getX();
+      pose_with_covariance_stamped_msg->pose.pose.orientation.y = f2b_.getRotation().getY();
+      pose_with_covariance_stamped_msg->pose.pose.orientation.z = f2b_.getRotation().getZ();
+      pose_with_covariance_stamped_msg->pose.pose.orientation.w = f2b_.getRotation().getW();
 
       if (input_.do_compute_covariance)
       {
@@ -605,7 +625,9 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
     if (publish_tf_)
     {
-      tf::StampedTransform transform_msg (f2b_, time, fixed_frame_, base_frame_);
+      geometry_msgs::TransformStamped transform_msg;
+      tf2::convert(f2b_, transform_msg.transform);
+      transform_msg.header.stamp = time;
       tf_broadcaster_.sendTransform (transform_msg);
     }
   }
@@ -637,9 +659,9 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   ROS_DEBUG("Scan matcher total duration: %.1f ms", dur);
 }
 
-bool LaserScanMatcher::newKeyframeNeeded(const tf::Transform& d)
+bool LaserScanMatcher::newKeyframeNeeded(const tf2::Transform& d)
 {
-  if (fabs(tf::getYaw(d.getRotation())) > kf_dist_angular_) return true;
+  if (fabs(getYaw(d.getRotation())) > kf_dist_angular_) return true;
 
   double x = d.getOrigin().getX();
   double y = d.getOrigin().getY();
@@ -779,20 +801,26 @@ bool LaserScanMatcher::getBaseToLaserTf (const std::string& frame_id)
 {
   ros::Time t = ros::Time::now();
 
-  tf::StampedTransform base_to_laser_tf;
+  geometry_msgs::TransformStamped base_to_laser_tf;
+
   try
   {
-    tf_listener_.waitForTransform(
-      base_frame_, frame_id, t, ros::Duration(1.0));
-    tf_listener_.lookupTransform (
-      base_frame_, frame_id, t, base_to_laser_tf);
+    if(tfBuffer_.canTransform(base_frame_, frame_id, t, ros::Duration(1.0)))
+    {
+      base_to_laser_tf = tfBuffer_.lookupTransform (base_frame_, frame_id, t);
+    }
+    else
+    {
+      ROS_WARN_STREAM("Merged Publisher is waiting for transform from " << base_frame_ << " to " << frame_id << " to become available.");
+      return false;
+    }
   }
-  catch (tf::TransformException ex)
+  catch (tf2::TransformException ex)
   {
     ROS_WARN("Could not get initial transform from base to laser frame, %s", ex.what());
     return false;
   }
-  base_to_laser_ = base_to_laser_tf;
+  tf2::convert(base_to_laser_tf.transform, base_to_laser_);
   laser_to_base_ = base_to_laser_.inverse();
 
   return true;
@@ -830,8 +858,8 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
     pr_ch_y = latest_odom_msg_.pose.pose.position.y -
               last_used_odom_msg_.pose.pose.position.y;
 
-    pr_ch_a = tf::getYaw(latest_odom_msg_.pose.pose.orientation) -
-              tf::getYaw(last_used_odom_msg_.pose.pose.orientation);
+    pr_ch_a = getYaw(latest_odom_msg_.pose.pose.orientation) -
+              getYaw(last_used_odom_msg_.pose.pose.orientation);
 
     if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
     else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
@@ -842,8 +870,8 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
   // **** use imu
   if (use_imu_ && received_imu_)
   {
-    pr_ch_a = tf::getYaw(latest_imu_msg_.orientation) -
-              tf::getYaw(last_used_imu_msg_.orientation);
+    pr_ch_a = getYaw(latest_imu_msg_.orientation) -
+              getYaw(last_used_imu_msg_.orientation);
 
     if      (pr_ch_a >= M_PI) pr_ch_a -= 2.0 * M_PI;
     else if (pr_ch_a < -M_PI) pr_ch_a += 2.0 * M_PI;
@@ -853,12 +881,29 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
 }
 
 void LaserScanMatcher::createTfFromXYTheta(
-  double x, double y, double theta, tf::Transform& t)
+  double x, double y, double theta, tf2::Transform& t)
 {
-  t.setOrigin(tf::Vector3(x, y, 0.0));
-  tf::Quaternion q;
+  t.setOrigin(tf2::Vector3(x, y, 0.0));
+  tf2::Quaternion q;
   q.setRPY(0.0, 0.0, theta);
   t.setRotation(q);
+}
+
+double LaserScanMatcher::getYaw(const tf2::Quaternion rotation)
+{
+  tf2::Matrix3x3 m(rotation);
+  double roll,pitch,yaw;
+  m.getRPY(roll,pitch,yaw);
+
+  return yaw;
+}
+
+double LaserScanMatcher::getYaw(const geometry_msgs::Quaternion rotation)
+{
+  tf2::Quaternion q;
+  tf2::convert(rotation, q);
+
+  return getYaw(q);
 }
 
 } // namespace scan_tools
