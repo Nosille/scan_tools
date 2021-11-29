@@ -14,7 +14,7 @@ set( ROS_CXX_DEPENDENCIES
 
 # Find catkin and all required ROS components
 find_package(catkin REQUIRED COMPONENTS ${ROS_CXX_DEPENDENCIES} rostest)
-find_package(PCL REQUIRED QUIET)
+find_package(PCL REQUIRED)
 
 # Find csm project
 find_package(PkgConfig)
