@@ -56,14 +56,14 @@ ScanToCloudConverter::~ScanToCloudConverter()
 
 void ScanToCloudConverter::scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan_msg)
 {
-  PointCloudT::Ptr cloud_msg =
-    boost::shared_ptr<PointCloudT>(new PointCloudT());
+  PointCloudT::Ptr cloud(new PointCloudT());
+  pcl_conversions::toPCL(scan_msg->header, cloud->header);
 
-  cloud_msg->points.resize(scan_msg->ranges.size());
+  cloud->points.resize(scan_msg->ranges.size());
 
   for (unsigned int i = 0; i < scan_msg->ranges.size(); ++i)
   {
-    PointT& p = cloud_msg->points[i];
+    PointT& p = cloud->points[i];
     float range = scan_msg->ranges[i];
     if (range > scan_msg->range_min && range < scan_msg->range_max)
     {
@@ -77,10 +77,15 @@ void ScanToCloudConverter::scanCallback(const sensor_msgs::LaserScan::ConstPtr& 
       p = invalid_point_;
   }
 
-  cloud_msg->width = scan_msg->ranges.size();
-  cloud_msg->height = 1;
-  cloud_msg->is_dense = false; //contains nans
-  pcl_conversions::toPCL(scan_msg->header, cloud_msg->header);
+  cloud->width = scan_msg->ranges.size();
+  cloud->height = 1;
+  cloud->is_dense = false; //contains nans
+
+  pcl::PCLPointCloud2::Ptr cloud_pc2(new pcl::PCLPointCloud2);
+  pcl::toPCLPointCloud2(*cloud, *cloud_pc2);
+
+  sensor_msgs::PointCloud2::Ptr cloud_msg(new sensor_msgs::PointCloud2());
+  pcl_conversions::fromPCL(*cloud_pc2, *cloud_msg);
 
   cloud_publisher_.publish(cloud_msg);
 }

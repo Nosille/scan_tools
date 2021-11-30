@@ -373,11 +373,16 @@ void LaserScanMatcher::velStmpCallback(const geometry_msgs::TwistStamped::ConstP
   received_vel_ = true;
 }
 
-void LaserScanMatcher::cloudCallback (const PointCloudT::ConstPtr& cloud)
+void LaserScanMatcher::cloudCallback (const sensor_msgs::PointCloud2::ConstPtr& msg)
 {
   // **** if first scan, cache the tf from base to the scanner
 
-  std_msgs::Header cloud_header = pcl_conversions::fromPCL(cloud->header);
+  pcl::PCLPointCloud2::Ptr cloud_in(new pcl::PCLPointCloud2);
+  pcl_conversions::toPCL(*msg, *cloud_in);
+  pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>);
+  pcl::fromPCLPointCloud2(*cloud_in, *cloud);
+
+  std_msgs::Header cloud_header = msg->header;
 
   if (!initialized_)
   {
