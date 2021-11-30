@@ -149,6 +149,9 @@ void LaserScanMatcher::initParams()
   if (!nh_private_.getParam ("use_cloud_input", use_cloud_input_))
     use_cloud_input_= false;
 
+  if (!nh_private_.getParam ("use_tf", use_tf_))
+    use_tf_= false;    
+
   if (use_cloud_input_)
   {
     if (!nh_private_.getParam ("cloud_range_min", cloud_range_min_))
@@ -394,6 +397,12 @@ void LaserScanMatcher::cloudCallback (const sensor_msgs::PointCloud2::ConstPtr& 
       return;
     }
 
+    if(use_tf_) 
+    {
+      ROS_DEBUG("initial tf for f2b_kf_");
+      if(!getTf(fixed_frame_, base_frame_, msg->header.stamp, f2b_kf_)) return;
+    } 
+
     PointCloudToLDP(cloud, prev_ldp_scan_);
     last_icp_time_ = cloud_header.stamp;
     initialized_ = true;
@@ -419,6 +428,12 @@ void LaserScanMatcher::scanCallback (const sensor_msgs::LaserScan::ConstPtr& sca
       return;
     }
 
+    if(use_tf_) 
+    {
+      ROS_DEBUG("initial tf for f2b_kf_");
+      if(!getTf(fixed_frame_, base_frame_, scan_msg->header.stamp, f2b_kf_)) return;
+    } 
+
     laserScanToLDP(scan_msg, prev_ldp_scan_);
     last_icp_time_ = scan_msg->header.stamp;
     initialized_ = true;
@@ -432,6 +447,13 @@ void LaserScanMatcher::scanCallback (const sensor_msgs::LaserScan::ConstPtr& sca
 void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 {
   ros::WallTime start = ros::WallTime::now();
+
+  //if use_tf flag is set, update transform to match value on tf server
+  if(use_tf_) 
+  {
+    ROS_DEBUG("current tf for f2b_");
+    if(!getTf(fixed_frame_, base_frame_, time, f2b_)) return;
+  }
 
   // CSM is used in the following way:
   // The scans are always in the laser frame
@@ -468,7 +490,11 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
   // account for the change since the last kf, in the fixed frame
 
+  ROS_DEBUG_STREAM("f2b_: " << f2b_.getOrigin().getX() << ", " << f2b_.getOrigin().getY() << ", " << getYaw(f2b_.getRotation()));
+  ROS_DEBUG_STREAM("f2b_kf_: " << f2b_kf_.getOrigin().getX() << ", " << f2b_kf_.getOrigin().getY() << ", " << getYaw(f2b_kf_.getRotation()));
   pr_ch = pr_ch * (f2b_ * f2b_kf_.inverse());
+  ROS_DEBUG_STREAM("predict change fixed frame: " << pr_ch.getOrigin().getX() << ", " << pr_ch.getOrigin().getY() << ", " << getYaw(pr_ch.getRotation()));
+
 
   // the predicted change of the laser's position, in the laser frame
 
@@ -499,6 +525,7 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
   // *** scan match - using point to line icp from CSM
 
   sm_icp(&input_, &output_);
+  ROS_DEBUG_STREAM("icp result: " << output_.x[0] << ", " << output_.x[1] << ", " << output_.x[2]);
   tf2::Transform corr_ch;
 
   if (output_.valid)
@@ -641,6 +668,7 @@ void LaserScanMatcher::processScan(LDP& curr_ldp_scan, const ros::Time& time)
 
   if (newKeyframeNeeded(corr_ch))
   {
+    ROS_DEBUG_STREAM("New key frame!");
     // generate a keyframe
     ld_free(prev_ldp_scan_);
     prev_ldp_scan_ = curr_ldp_scan;
@@ -838,6 +866,8 @@ void LaserScanMatcher::getPrediction(double& pr_ch_x, double& pr_ch_y,
   pr_ch_y = 0.0;
   pr_ch_a = 0.0;
 
+  if(use_tf_) return;
+
   // **** use velocity (for example from ab-filter)
   if (use_vel_)
   {
@@ -892,8 +922,8 @@ void LaserScanMatcher::createTfFromXYTheta(
 double LaserScanMatcher::getYaw(const tf2::Quaternion rotation)
 {
   tf2::Matrix3x3 m(rotation);
-  double roll,pitch,yaw;
-  m.getRPY(roll,pitch,yaw);
+  double roll, pitch, yaw;
+  m.getRPY(roll, pitch, yaw);
 
   return yaw;
 }
@@ -904,6 +934,37 @@ double LaserScanMatcher::getYaw(const geometry_msgs::Quaternion rotation)
   tf2::convert(rotation, q);
 
   return getYaw(q);
+}
+
+bool LaserScanMatcher::getTf(const std::string& target_frame, const std::string& source_frame, const ros::Time& time, tf2::Transform& result)
+{
+
+  try
+  {
+    if(tfBuffer_.canTransform(target_frame, source_frame, time, ros::Duration(1.0)))
+    {
+      geometry_msgs::TransformStamped trans;
+      trans = tfBuffer_.lookupTransform(target_frame, source_frame, time);
+      double x, y, a;
+      x = trans.transform.translation.x;
+      y = trans.transform.translation.y;
+      a = getYaw(trans.transform.rotation);
+      createTfFromXYTheta(x, y, a, result);
+      return true;
+    }
+    else
+    {
+      ROS_WARN_STREAM("getTF is waiting for transform from " << source_frame << " to " << target_frame << " to become available.");
+      return false;
+    }
+  }
+
+  catch (tf2::TransformException ex)
+  {
+    ROS_WARN("getTF could not get transform from %d to %d, %s", source_frame, target_frame, ex.what());
+    return false;
+  }
+
 }
 
 } // namespace scan_tools

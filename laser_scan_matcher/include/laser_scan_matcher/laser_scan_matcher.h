@@ -131,6 +131,7 @@ class LaserScanMatcher
     // 3) velocity [vx, vy, vtheta], usually from ab-filter - /vel.
     // If more than one is enabled, priority is imu > odom > velocity
 
+    bool use_tf_;
     bool use_imu_;
     bool use_odom_;
     bool use_vel_;
@@ -193,6 +194,7 @@ class LaserScanMatcher
     void createTfFromXYTheta(double x, double y, double theta, tf2::Transform& t);
     double getYaw(const tf2::Quaternion rotation);
     double getYaw(const geometry_msgs::Quaternion rotation);
+    bool getTf(const std::string& target_frame, const std::string& source_frame, const ros::Time& time, tf2::Transform& result);
 };
 
 } // namespace scan_tools
